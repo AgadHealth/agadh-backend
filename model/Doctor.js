@@ -9,6 +9,7 @@ const doctorSchema = new mongoose.Schema({
   Address: { type: String, required: true },
   user: { type: String, default: "Doctor" },
   hospitalAffiliation: { type: String, required: true },
+  specialization: { type: String, required: true },
   practiceType: { type: String, required: true  }
 });
 

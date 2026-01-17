@@ -11,6 +11,7 @@ const doctorController = {
         DOB,
         Address,
         hospitalAffiliation,
+        specialization,
         practiceType
       } = req.body;
 
@@ -22,6 +23,7 @@ const doctorController = {
         DOB,
         Address,
         hospitalAffiliation,
+        specialization,
         practiceType
       });
 
