@@ -1,36 +1,49 @@
-const mongoose = require("mongoose");
+const getSupabaseClient = require("../config/supabaseClient");
 
-const patientSchema = new mongoose.Schema({
-  FirstName: { type: String, required: true },
-  LastName: { type: String, required: true },
-  Email: { type: String, required: true },
-  PhoneNumber: { type: String, required: true },
-  DOB: { type: Date, required: true }, 
-  Address: { type: String, required: true },
-  user: { type: String, default: "patient" },
+const Patient = {
+  upsertProfile: async (userId) => {
+    const { data, error } = await getSupabaseClient()
+      .from("patients")
+      .upsert({ id: userId }, { onConflict: "id" })
+      .select()
+      .single();
 
-  vitals: {
-    blood_pressure: {
-      systolic: { type: Number },
-      diastolic: { type: Number },
-      date: { type: Date, default: Date.now }
-    },
-
-    blood_sugar: {
-      level: { type: Number },
-      date: { type: Date, default: Date.now }
-    },
-
-    weight: {
-      value: { type: Number },
-      date: { type: Date, default: Date.now }
-    }
+    if (error) throw error;
+    return data;
   },
-  uploadFiles: [
-    {
-      filename: { type: String },
-    },
-  ],
-});
 
-module.exports = mongoose.model("Patient", patientSchema);
+  findByUserId: async (userId) => {
+    const { data, error } = await getSupabaseClient()
+      .from("patients")
+      .select("*, users(*)")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  },
+
+  listRecords: async (table, userId) => {
+    const { data, error } = await getSupabaseClient()
+      .from(table)
+      .select("*")
+      .eq("patient_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return data;
+  },
+
+  createRecord: async (table, userId, record) => {
+    const { data, error } = await getSupabaseClient()
+      .from(table)
+      .insert({ ...record, patient_id: userId })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+};
+
+module.exports = Patient;

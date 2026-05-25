@@ -1,11 +1,12 @@
 const express = require("express");
-const router = express.Router();
+const requireAuth = require("../middleware/requireAuth");
 const doctorController = require("../controller/doctorController");
 
+const router = express.Router();
 
-
-
-
-router.post("/register",  doctorController.registerDoctor);
+router.use(requireAuth);
+router.get("/me", doctorController.me);
+router.post("/register", doctorController.registerDoctor);
+router.put("/profile", doctorController.registerDoctor);
 
 module.exports = router;

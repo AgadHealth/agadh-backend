@@ -3,25 +3,19 @@ const cors = require("cors");
 const patientRoutes = require("./Routes/patientRouter");
 const doctorRoutes = require("./Routes/doctorRouter");
 const userRoutes = require("./Routes/userRouter");
-const connectToMongoDB = require("./config/connectToMongoDB");
-require("dotenv").config(); // Load environment variables from .env file
+require("dotenv").config();
 
 const app = express();
-app.set("trust proxy", 1);
-
 const PORT = process.env.PORT || 5000;
+const frontendUrls = process.env.FRONTEND_URLS
+  ? process.env.FRONTEND_URLS.split(",").map((url) => url.trim())
+  : null;
 
-// Connect to MongoDB
-connectToMongoDB();
-
-// Middleware
-app.use(cors()
-);
-
+app.set("trust proxy", 1);
+app.use(cors({ origin: frontendUrls || true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
 app.use("/api/patient", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
 app.use("/api/user", userRoutes);
@@ -30,10 +24,19 @@ app.get("/", (req, res) => {
   res.send("backend is live");
 });
 
-// Start server only if this file is run directly
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+app.use((err, req, res, next) => {
+  console.error("Unhandled request error:", err.message);
+  res.status(500).json({ error: "Unexpected server error." });
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`🚀 Server running at http://localhost:${PORT}`);
+    console.log(`Server running at http://localhost:${PORT}`);
   });
 }
 
+module.exports = app;

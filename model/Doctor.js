@@ -1,17 +1,37 @@
-const mongoose = require("mongoose");
+const getSupabaseClient = require("../config/supabaseClient");
 
-const doctorSchema = new mongoose.Schema({
-  FirstName: { type: String, required: true },
-  LastName: { type: String, required: true },
-  Email: { type: String, required: true },
-  PhoneNumber: { type: String, required: true },
-  DOB: { type: Date, required: true }, 
-  Address: { type: String, required: true },
-  user: { type: String, default: "Doctor" },
-  hospitalAffiliation: { type: String, required: true },
-  specialization: { type: String, required: true },
-  practiceType: { type: String, required: true  }
-});
+const Doctor = {
+  upsertProfile: async (userId, doctor) => {
+    const { data, error } = await getSupabaseClient()
+      .from("doctors")
+      .upsert(
+        {
+          id: userId,
+          medical_degree: doctor.medicalDegree,
+          specialization: doctor.specialization,
+          years_of_experience: Number(doctor.yearsOfExperience),
+          clinic_name: doctor.clinicName,
+          clinic_location: doctor.clinicLocation,
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
 
+    if (error) throw error;
+    return data;
+  },
 
-module.exports = mongoose.model("Doctor", doctorSchema);
+  findByUserId: async (userId) => {
+    const { data, error } = await getSupabaseClient()
+      .from("doctors")
+      .select("*, users(*)")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  },
+};
+
+module.exports = Doctor;
