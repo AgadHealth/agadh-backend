@@ -6,12 +6,9 @@ const router = express.Router();
 
 router.use(requireAuth);
 router.post("/register", patientController.registerPatient);
-router.use(patientController.requirePatient);
 router.get("/me", patientController.me);
 router.get("/vitals", patientController.listVitals);
 router.post("/vitals", patientController.addVital);
-router.get("/prescriptions", patientController.listPrescriptions);
-router.post("/prescriptions", patientController.addPrescription);
 router.get("/lab-tests", patientController.listLabTests);
 router.post("/lab-tests", patientController.addLabTest);
 router.get("/files", patientController.listFiles);

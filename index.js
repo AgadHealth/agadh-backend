@@ -3,6 +3,7 @@ const cors = require("cors");
 const patientRoutes = require("./Routes/patientRouter");
 const doctorRoutes = require("./Routes/doctorRouter");
 const userRoutes = require("./Routes/userRouter");
+const accessRoutes = require("./Routes/accessRouter");
 require("dotenv").config();
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/patient", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/access", accessRoutes);
 
 app.get("/", (req, res) => {
   res.send("backend is live");

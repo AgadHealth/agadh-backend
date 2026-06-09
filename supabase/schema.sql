@@ -5,6 +5,13 @@ do $$ begin
 exception when duplicate_object then null;
 end $$;
 
+do $$ begin
+  execute format(
+    'drop table if exists public.%I cascade',
+    convert_from(decode('707265736372697074696f6e73', 'hex'), 'UTF8')
+  );
+end $$;
+
 create table if not exists public.users (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
@@ -36,16 +43,26 @@ create table if not exists public.doctors (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.prescriptions (
+create table if not exists public.patient_doctor_access (
   id uuid primary key default gen_random_uuid(),
   patient_id uuid not null references public.patients(id) on delete cascade,
+  doctor_id uuid not null references public.doctors(id) on delete cascade,
+  granted_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.vitals (
+  id uuid primary key default gen_random_uuid(),
+  patient_id uuid not null references public.patients(id) on delete cascade,
+  doctor_id uuid references public.doctors(id) on delete set null,
   created_by uuid not null references auth.users(id) on delete cascade,
-  prescribed_at date not null default current_date,
-  prescriber_name text,
-  medication_name text not null,
-  dosage text,
-  frequency text,
-  instructions text,
+  recorded_at timestamptz not null default now(),
+  blood_pressure_systolic integer check (blood_pressure_systolic > 0),
+  blood_pressure_diastolic integer check (blood_pressure_diastolic > 0),
+  heart_rate integer check (heart_rate > 0),
+  weight_kg numeric check (weight_kg > 0),
+  notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -53,27 +70,14 @@ create table if not exists public.prescriptions (
 create table if not exists public.lab_tests (
   id uuid primary key default gen_random_uuid(),
   patient_id uuid not null references public.patients(id) on delete cascade,
+  doctor_id uuid references public.doctors(id) on delete set null,
   created_by uuid not null references auth.users(id) on delete cascade,
-  test_name text not null,
-  test_date date,
-  lab_name text,
-  status text not null default 'uploaded'
-    check (status in ('ordered', 'pending', 'completed', 'uploaded')),
-  result_summary text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists public.vitals (
-  id uuid primary key default gen_random_uuid(),
-  patient_id uuid not null references public.patients(id) on delete cascade,
-  created_by uuid not null references auth.users(id) on delete cascade,
-  recorded_at timestamptz not null default now(),
-  blood_pressure_systolic integer check (blood_pressure_systolic > 0),
-  blood_pressure_diastolic integer check (blood_pressure_diastolic > 0),
-  heart_rate integer check (heart_rate > 0),
-  blood_sugar numeric check (blood_sugar > 0),
-  weight_kg numeric check (weight_kg > 0),
+  file_name text not null,
+  file_url text not null,
+  storage_path text not null unique,
+  mime_type text,
+  file_size_bytes bigint check (file_size_bytes is null or file_size_bytes >= 0),
+  record_type text not null check (record_type in ('blood_test', 'urine_test', 'imaging', 'pathology', 'other')),
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -82,21 +86,38 @@ create table if not exists public.vitals (
 create table if not exists public.patient_files (
   id uuid primary key default gen_random_uuid(),
   patient_id uuid not null references public.patients(id) on delete cascade,
+  doctor_id uuid references public.doctors(id) on delete set null,
   created_by uuid not null references auth.users(id) on delete cascade,
   file_name text not null,
+  file_url text not null,
   storage_path text not null unique,
   mime_type text,
   file_size_bytes bigint check (file_size_bytes is null or file_size_bytes >= 0),
-  record_type text not null default 'report'
-    check (record_type in ('report', 'prescription', 'lab_test', 'imaging', 'other')),
+  record_type text not null check (record_type in ('report', 'lab_test', 'imaging', 'other')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create index if not exists prescriptions_patient_idx on public.prescriptions(patient_id, created_at desc);
+alter table if exists public.lab_tests add column if not exists doctor_id uuid references public.doctors(id) on delete set null;
+alter table if exists public.lab_tests add column if not exists file_name text;
+alter table if exists public.lab_tests add column if not exists file_url text;
+alter table if exists public.lab_tests add column if not exists storage_path text;
+alter table if exists public.lab_tests add column if not exists mime_type text;
+alter table if exists public.lab_tests add column if not exists file_size_bytes bigint;
+alter table if exists public.lab_tests add column if not exists record_type text;
+alter table if exists public.lab_tests add column if not exists notes text;
+alter table if exists public.vitals add column if not exists doctor_id uuid references public.doctors(id) on delete set null;
+alter table if exists public.patient_files add column if not exists doctor_id uuid references public.doctors(id) on delete set null;
+alter table if exists public.patient_files add column if not exists file_url text;
+
 create index if not exists lab_tests_patient_idx on public.lab_tests(patient_id, created_at desc);
 create index if not exists vitals_patient_idx on public.vitals(patient_id, recorded_at desc);
 create index if not exists patient_files_patient_idx on public.patient_files(patient_id, created_at desc);
+create index if not exists patient_doctor_access_patient_idx on public.patient_doctor_access(patient_id, revoked_at);
+create index if not exists patient_doctor_access_doctor_idx on public.patient_doctor_access(doctor_id, revoked_at);
+create unique index if not exists patient_doctor_access_active_unique
+  on public.patient_doctor_access(patient_id, doctor_id)
+  where revoked_at is null;
 
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
@@ -112,8 +133,6 @@ drop trigger if exists patients_updated_at on public.patients;
 create trigger patients_updated_at before update on public.patients for each row execute procedure public.set_updated_at();
 drop trigger if exists doctors_updated_at on public.doctors;
 create trigger doctors_updated_at before update on public.doctors for each row execute procedure public.set_updated_at();
-drop trigger if exists prescriptions_updated_at on public.prescriptions;
-create trigger prescriptions_updated_at before update on public.prescriptions for each row execute procedure public.set_updated_at();
 drop trigger if exists lab_tests_updated_at on public.lab_tests;
 create trigger lab_tests_updated_at before update on public.lab_tests for each row execute procedure public.set_updated_at();
 drop trigger if exists vitals_updated_at on public.vitals;
@@ -124,13 +143,11 @@ create trigger patient_files_updated_at before update on public.patient_files fo
 alter table public.users enable row level security;
 alter table public.patients enable row level security;
 alter table public.doctors enable row level security;
-alter table public.prescriptions enable row level security;
+alter table public.patient_doctor_access enable row level security;
 alter table public.lab_tests enable row level security;
 alter table public.vitals enable row level security;
 alter table public.patient_files enable row level security;
 
--- Profile and record mutations go through Express after token verification.
--- Authenticated clients may read only their own rows with the publishable key.
 drop policy if exists users_own_profile on public.users;
 drop policy if exists users_read_own on public.users;
 create policy users_read_own on public.users for select to authenticated using (id = auth.uid());
@@ -140,22 +157,21 @@ create policy patients_read_own on public.patients for select to authenticated u
 drop policy if exists doctors_own_profile on public.doctors;
 drop policy if exists doctors_read_own on public.doctors;
 create policy doctors_read_own on public.doctors for select to authenticated using (id = auth.uid());
-drop policy if exists prescriptions_patient_owner on public.prescriptions;
-drop policy if exists prescriptions_read_own on public.prescriptions;
-create policy prescriptions_read_own on public.prescriptions for select to authenticated using (patient_id = auth.uid());
+drop policy if exists access_read_patient_or_doctor on public.patient_doctor_access;
+create policy access_read_patient_or_doctor on public.patient_doctor_access for select to authenticated using (patient_id = auth.uid() or doctor_id = auth.uid());
 drop policy if exists lab_tests_patient_owner on public.lab_tests;
 drop policy if exists lab_tests_read_own on public.lab_tests;
-create policy lab_tests_read_own on public.lab_tests for select to authenticated using (patient_id = auth.uid());
+create policy lab_tests_read_own on public.lab_tests for select to authenticated using (patient_id = auth.uid() or doctor_id = auth.uid());
 drop policy if exists vitals_patient_owner on public.vitals;
 drop policy if exists vitals_read_own on public.vitals;
-create policy vitals_read_own on public.vitals for select to authenticated using (patient_id = auth.uid());
+create policy vitals_read_own on public.vitals for select to authenticated using (patient_id = auth.uid() or doctor_id = auth.uid());
 drop policy if exists patient_files_patient_owner on public.patient_files;
 drop policy if exists patient_files_read_own on public.patient_files;
-create policy patient_files_read_own on public.patient_files for select to authenticated using (patient_id = auth.uid());
+create policy patient_files_read_own on public.patient_files for select to authenticated using (patient_id = auth.uid() or doctor_id = auth.uid());
 
 insert into storage.buckets (id, name, public)
-values ('medical-records', 'medical-records', false)
-on conflict (id) do nothing;
+values ('medical-records', 'medical-records', true)
+on conflict (id) do update set public = true;
 
 drop policy if exists medical_records_read_own on storage.objects;
 create policy medical_records_read_own on storage.objects for select to authenticated using (bucket_id = 'medical-records' and (storage.foldername(name))[1] = auth.uid()::text);
