@@ -5,8 +5,6 @@ const doctorController = require("../controller/doctorController");
 const router = express.Router();
 
 router.use(requireAuth);
-router.get("/me", doctorController.me);
 router.post("/register", doctorController.registerDoctor);
-router.put("/profile", doctorController.registerDoctor);
 
 module.exports = router;
