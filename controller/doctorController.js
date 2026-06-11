@@ -38,15 +38,6 @@ const doctorController = {
       return res.status(400).json({ error: error.message });
     }
   },
-
-  me: async (req, res) => {
-    try {
-      const doctor = await Doctor.findByUserId(req.authUser.id);
-      return res.json({ success: true, doctor });
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-  },
 };
 
 module.exports = doctorController;

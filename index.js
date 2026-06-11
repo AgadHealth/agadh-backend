@@ -1,10 +1,15 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const patientRoutes = require("./Routes/patientRouter");
 const doctorRoutes = require("./Routes/doctorRouter");
 const userRoutes = require("./Routes/userRouter");
 const accessRoutes = require("./Routes/accessRouter");
-require("dotenv").config();
+const uploadRoutes = require("./Routes/uploadRouter");
+const viewRoutes = require("./Routes/viewRouter");
+const filesRoutes = require("./Routes/filesRouter");
+const patientsRoutes = require("./Routes/patientsRouter");
+const vitalsRoutes = require("./Routes/vitalsRouter");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -21,6 +26,11 @@ app.use("/api/patient", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/access", accessRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/view",   viewRoutes);
+app.use("/api/files",  filesRoutes);
+app.use("/api/patients", patientsRoutes);
+app.use("/api/vitals", vitalsRoutes);
 
 app.get("/", (req, res) => {
   res.send("backend is live");

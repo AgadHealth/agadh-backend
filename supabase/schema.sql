@@ -93,7 +93,7 @@ create table if not exists public.patient_files (
   storage_path text not null unique,
   mime_type text,
   file_size_bytes bigint check (file_size_bytes is null or file_size_bytes >= 0),
-  record_type text not null check (record_type in ('report', 'lab_test', 'imaging', 'other')),
+  record_type text not null check (record_type in ('report', 'lab_test', 'imaging', 'prescription', 'other')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -109,6 +109,10 @@ alter table if exists public.lab_tests add column if not exists notes text;
 alter table if exists public.vitals add column if not exists doctor_id uuid references public.doctors(id) on delete set null;
 alter table if exists public.patient_files add column if not exists doctor_id uuid references public.doctors(id) on delete set null;
 alter table if exists public.patient_files add column if not exists file_url text;
+-- Add 'prescription' to the record_type check constraint (idempotent migration)
+alter table public.patient_files drop constraint if exists patient_files_record_type_check;
+alter table public.patient_files add constraint patient_files_record_type_check
+  check (record_type in ('report', 'lab_test', 'imaging', 'prescription', 'other'));
 
 create index if not exists lab_tests_patient_idx on public.lab_tests(patient_id, created_at desc);
 create index if not exists vitals_patient_idx on public.vitals(patient_id, recorded_at desc);
