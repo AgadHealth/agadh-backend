@@ -1,20 +1,37 @@
 const crypto = require("crypto");
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const requireAuth = require("../middleware/requireAuth");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
 
+const generateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,          
+  max: 5,                             // 5 generated codes per window per user
+  keyGenerator: (req) => req.user?.userId || req.ip,
+  standardHeaders: true,              
+  legacyHeaders: false,              
+  message: {
+    error: "Too many access codes generated. Please wait before generating another.",
+  },
+});
+
+const claimLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,          // 15-minute sliding window
+  max: 10,                            // 10 claim attempts per window per IP
+  keyGenerator: (req) => req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many claim attempts. Please wait before trying again.",
+  },
+});
+
 const router = express.Router();
 
-// All access routes require a valid session
 router.use(requireAuth);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /access/generate  (patient only)
-// Patient generates a time-limited access code.
-// Frontend turns this code into a QR — backend just returns the raw code.
-// ─────────────────────────────────────────────────────────────────────────────
-router.post("/generate", requireRole("patient"), async (req, res) => {
+router.post("/generate", generateLimiter, requireRole("patient"), async (req, res) => {
   const { duration_minutes } = req.body;
 
   const ALLOWED = [15, 30, 60];
@@ -46,11 +63,7 @@ router.post("/generate", requireRole("patient"), async (req, res) => {
   return res.status(201).json({ access_code: data.access_code });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /access/claim  (doctor only)
-// Doctor submits an access_code (scanned from QR or typed manually).
-// ─────────────────────────────────────────────────────────────────────────────
-router.post("/claim", requireRole("doctor"), async (req, res) => {
+router.post("/claim", claimLimiter, requireRole("doctor"), async (req, res) => {
   const { access_code } = req.body;
   if (!access_code) {
     return res.status(400).json({ error: "access_code is required." });
@@ -115,10 +128,7 @@ router.post("/claim", requireRole("doctor"), async (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /access/revoke/:doctorId  (patient only)
-// Patient revokes a specific doctor's active access.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.delete("/revoke/:doctorId", requireRole("patient"), async (req, res) => {
   const { doctorId } = req.params;
   const supabase = getSupabaseClient();
@@ -162,10 +172,7 @@ router.delete("/revoke/:doctorId", requireRole("patient"), async (req, res) => {
 });
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /access/my-doctors  (patient only)
-// Returns all active doctors who have claimed this patient's access.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.get("/my-doctors", requireRole("patient"), async (req, res) => {
   const { data, error } = await getSupabaseClient()
     .from('patient_doctor_access')
@@ -193,10 +200,7 @@ router.get("/my-doctors", requireRole("patient"), async (req, res) => {
   return res.status(200).json({ data });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /access/my-patients  (doctor only)
-// Returns all active patients this doctor currently has access to.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.get("/my-patients", requireRole("doctor"), async (req, res) => {
   const { data, error } = await getSupabaseClient()
     .from("patient_doctor_access")
