@@ -1,16 +1,17 @@
 const crypto = require("crypto");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
+const { ipKeyGenerator } = require("express-rate-limit");
 const requireAuth = require("../middleware/requireAuth");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
 
 const generateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,          
+  windowMs: 15 * 60 * 1000,
   max: 5,                             // 5 generated codes per window per user
-  keyGenerator: (req) => req.user?.userId || req.ip,
-  standardHeaders: true,              
-  legacyHeaders: false,              
+  keyGenerator: (req) => req.user?.userId || ipKeyGenerator(req),
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     error: "Too many access codes generated. Please wait before generating another.",
   },
@@ -19,7 +20,7 @@ const generateLimiter = rateLimit({
 const claimLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,          // 15-minute sliding window
   max: 10,                            // 10 claim attempts per window per IP
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => ipKeyGenerator(req),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
