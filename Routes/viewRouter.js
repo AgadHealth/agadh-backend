@@ -3,6 +3,7 @@ const cloudinary = require("../config/cloudinary");
 const getSupabaseClient = require("../config/supabaseClient");
 const requireAuth = require("../middleware/requireAuth");
 const { isAccessActive } = require("../helpers/accessHelper");
+const { isValidUUID } = require("../helpers/validators");
 
 const router = express.Router();
 
@@ -71,6 +72,9 @@ async function assertAccess(req, patientId) {
 function viewHandler(table) {
   return async (req, res) => {
     const { id } = req.params;
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid file ID format." });
+    }
 
     // ── 1. Fetch the file row ────────────────────────────────────
     let row;

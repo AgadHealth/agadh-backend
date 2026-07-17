@@ -3,6 +3,7 @@ const requireAuth = require("../middleware/requireAuth");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
 const { isAccessActive } = require("../helpers/accessHelper");
+const { isValidUUID } = require("../helpers/validators");
 
 const router = express.Router();
 
@@ -21,6 +22,9 @@ const calculateAge = (dobString) => {
 // GET /api/patients/:patientId/details (doctor only)
 router.get("/:patientId/details", requireAuth, requireRole("doctor"), async (req, res) => {
   const { patientId } = req.params;
+  if (!isValidUUID(patientId)) {
+    return res.status(400).json({ error: "Invalid patient ID format." });
+  }
   try {
     const active = await isAccessActive(patientId, req.user.userId);
     if (!active) {

@@ -1,13 +1,15 @@
 const express = require("express");
 const requireAuth = require("../middleware/requireAuth");
+const requireConsent = require("../middleware/requireConsent");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
 const { isAccessActive } = require("../helpers/accessHelper");
+const { isValidUUID } = require("../helpers/validators");
 
 const router = express.Router();
 
 // GET /api/vitals/my-vitals (patient only)
-router.get("/my-vitals", requireAuth, requireRole("patient"), async (req, res) => {
+router.get("/my-vitals", requireAuth, requireConsent, requireRole("patient"), async (req, res) => {
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
@@ -24,8 +26,11 @@ router.get("/my-vitals", requireAuth, requireRole("patient"), async (req, res) =
 });
 
 // GET /api/vitals/:patientId (doctor only)
-router.get("/:patientId", requireAuth, requireRole("doctor"), async (req, res) => {
+router.get("/:patientId", requireAuth, requireConsent, requireRole("doctor"), async (req, res) => {
   const { patientId } = req.params;
+  if (!isValidUUID(patientId)) {
+    return res.status(400).json({ error: "Invalid patient ID format." });
+  }
   try {
     const active = await isAccessActive(patientId, req.user.userId);
     if (!active) {

@@ -5,6 +5,7 @@ const { ipKeyGenerator } = require("express-rate-limit");
 const requireAuth = require("../middleware/requireAuth");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
+const { isValidAccessCode, isValidUUID } = require("../helpers/validators");
 
 const generateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -28,9 +29,12 @@ const claimLimiter = rateLimit({
   },
 });
 
+const requireConsent = require("../middleware/requireConsent");
+
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(requireConsent);
 
 router.post("/generate", generateLimiter, requireRole("patient"), async (req, res) => {
   const { duration_minutes } = req.body;
@@ -68,6 +72,9 @@ router.post("/claim", claimLimiter, requireRole("doctor"), async (req, res) => {
   const { access_code } = req.body;
   if (!access_code) {
     return res.status(400).json({ error: "access_code is required." });
+  }
+  if (!isValidAccessCode(access_code)) {
+    return res.status(400).json({ error: "Invalid access code format." });
   }
 
   const supabase = getSupabaseClient();
@@ -132,6 +139,9 @@ router.post("/claim", claimLimiter, requireRole("doctor"), async (req, res) => {
 
 router.delete("/revoke/:doctorId", requireRole("patient"), async (req, res) => {
   const { doctorId } = req.params;
+  if (!isValidUUID(doctorId)) {
+    return res.status(400).json({ error: "Invalid doctor ID format." });
+  }
   const supabase = getSupabaseClient();
 
 
@@ -170,6 +180,43 @@ router.delete("/revoke/:doctorId", requireRole("patient"), async (req, res) => {
     return res.status(400).json({ error: updateError.message });
   }
   return res.status(200).json({ message: "Access revoked successfully." });
+});
+
+router.delete("/end-session/:patientId", requireRole("doctor"), async (req, res) => {
+  const { patientId } = req.params;
+  if (!isValidUUID(patientId)) {
+    return res.status(400).json({ error: "Invalid patient ID format." });
+  }
+  const supabase = getSupabaseClient();
+
+  const { data: grant, error: fetchError } = await supabase
+    .from("patient_doctor_access")
+    .select("id")
+    .eq("patient_id", patientId)
+    .eq("doctor_id", req.user.userId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("End Session Fetch Error:", fetchError);
+    return res.status(400).json({ error: fetchError.message });
+  }
+  if (!grant) {
+    return res
+      .status(404)
+      .json({ error: "No active session found for this patient." });
+  }
+
+  const { error: updateError } = await supabase
+    .from("patient_doctor_access")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("id", grant.id);
+
+  if (updateError) {
+    console.error("End Session Update Error:", updateError);
+    return res.status(400).json({ error: updateError.message });
+  }
+  return res.status(200).json({ message: "Session ended successfully." });
 });
 
 

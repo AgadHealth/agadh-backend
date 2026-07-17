@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const patientRoutes = require("./Routes/patientRouter");
 const doctorRoutes = require("./Routes/doctorRouter");
 const userRoutes = require("./Routes/userRouter");
@@ -10,15 +11,30 @@ const viewRoutes = require("./Routes/viewRouter");
 const filesRoutes = require("./Routes/filesRouter");
 const patientsRoutes = require("./Routes/patientsRouter");
 const vitalsRoutes = require("./Routes/vitalsRouter");
+const authRoutes = require("./Routes/authRouter");
+const consentRoutes = require("./Routes/consentRouter");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const frontendUrls = process.env.FRONTEND_URLS
-  ? process.env.FRONTEND_URLS.split(",").map((url) => url.trim())
-  : null;
+const allowedOrigins = (process.env.FRONTEND_URLS || '')
+  .split(',')
+  .map(url => url.trim())
+  .filter(Boolean);
+
+if (allowedOrigins.length === 0) {
+  throw new Error('FRONTEND_URLS is not configured. Refusing to start with open CORS.');
+}
 
 app.set("trust proxy", 1);
-app.use(cors({ origin: frontendUrls || true }));
+app.use(helmet());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -31,6 +47,8 @@ app.use("/api/view",   viewRoutes);
 app.use("/api/files",  filesRoutes);
 app.use("/api/patients", patientsRoutes);
 app.use("/api/vitals", vitalsRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/consent", consentRoutes);
 
 app.get("/", (req, res) => {
   res.send("backend is live");
