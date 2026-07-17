@@ -6,6 +6,31 @@ const cloudinary = require("../config/cloudinary");
 const getSupabaseClient = require("../config/supabaseClient");
 const requireAuth = require("../middleware/requireAuth");
 const { isAccessActive } = require("../helpers/accessHelper");
+const rateLimit = require("express-rate-limit");
+const { ipKeyGenerator } = require("express-rate-limit");
+const { isValidRecordType, isValidUUID, sanitizeString } = require("../helpers/validators");
+
+const profilePhotoLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  keyGenerator: (req) => req.user?.userId || ipKeyGenerator(req),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many profile photo upload requests. Please wait before trying again.",
+  },
+});
+
+const documentUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15,
+  keyGenerator: (req) => req.user?.userId || ipKeyGenerator(req),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many document upload requests. Please wait before trying again.",
+  },
+});
 
 const router = express.Router();
 
@@ -15,6 +40,12 @@ const ALLOWED_MIME = new Set([
   "image/png",
   "image/webp",
   "application/pdf",
+]);
+
+const PROFILE_PHOTO_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
 ]);
 
 const upload = multer({
@@ -46,6 +77,15 @@ function handleMulterError(err, req, res, next) {
 // ─── Helper: compress image with Sharp ───────────────────────────
 async function compressImage(buffer, mimetype) {
   const instance = sharp(buffer).resize({ width: 1920, withoutEnlargement: true });
+  if (mimetype === "image/jpeg") return instance.jpeg({ quality: 80 }).toBuffer();
+  if (mimetype === "image/png")  return instance.png({ quality: 80 }).toBuffer();
+  if (mimetype === "image/webp") return instance.webp({ quality: 80 }).toBuffer();
+  return buffer;
+}
+
+// ─── Helper: resize and compress profile photo with Sharp ────────
+async function resizeProfilePhoto(buffer, mimetype) {
+  const instance = sharp(buffer).resize({ width: 512, height: 512, fit: "inside", withoutEnlargement: true });
   if (mimetype === "image/jpeg") return instance.jpeg({ quality: 80 }).toBuffer();
   if (mimetype === "image/png")  return instance.png({ quality: 80 }).toBuffer();
   if (mimetype === "image/webp") return instance.webp({ quality: 80 }).toBuffer();
@@ -97,15 +137,23 @@ async function cleanupCloudinary(public_id, mimetype) {
 router.post(
   "/patient-files",
   requireAuth,
+  documentUploadLimiter,
   upload.single("file"),
   handleMulterError,
   async (req, res) => {
     const { file } = req;
     if (!file) return res.status(400).json({ error: "A file is required." });
 
-    const { file_name, record_type, patientId } = req.body;
+    let { file_name, record_type, patientId } = req.body;
     if (!file_name)   return res.status(400).json({ error: "file_name is required." });
     if (!record_type) return res.status(400).json({ error: "record_type is required." });
+    file_name = sanitizeString(file_name, 255);
+    if (!isValidRecordType(record_type)) {
+      return res.status(400).json({ error: "Invalid record type. Allowed: prescription, lab_report." });
+    }
+    if (patientId && !isValidUUID(patientId)) {
+      return res.status(400).json({ error: "Invalid patient ID format." });
+    }
 
     const isDoctor = req.user.role === "doctor";
 
@@ -160,6 +208,151 @@ router.post(
     }
 
     return res.status(201).json({ message: "File uploaded successfully.", fileId: row.id });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/upload/profile-photo
+// Handles profile photo upload: resizes, uploads to public folder, updates user
+// ─────────────────────────────────────────────────────────────────
+router.post(
+  "/profile-photo",
+  requireAuth,
+  profilePhotoLimiter,
+  upload.single("file"),
+  handleMulterError,
+  async (req, res) => {
+    const { file } = req;
+    if (!file) return res.status(400).json({ error: "A file is required." });
+    if (!PROFILE_PHOTO_MIME.has(file.mimetype)) {
+      return res.status(400).json({ error: "Profile photos must be JPEG, PNG, or WebP images." });
+    }
+
+    const supabase = getSupabaseClient();
+
+    try {
+      // 1. Look up user's current profile_photo_public_id to delete if exists
+      const { data: user, error: fetchError } = await supabase
+        .from("users")
+        .select("profile_photo_public_id")
+        .eq("id", req.user.userId)
+        .single();
+
+      if (fetchError) {
+        return res.status(500).json({ error: "Failed to fetch user record." });
+      }
+
+      if (user && user.profile_photo_public_id) {
+        try {
+          await cloudinary.uploader.destroy(user.profile_photo_public_id, {
+            type: "upload",
+            resource_type: "image",
+          });
+        } catch (err) {
+          console.error("Failed to destroy old profile photo on Cloudinary:", err);
+        }
+      }
+
+      // 2. Resize buffer using Sharp helper to max 512x512
+      let processedBuffer;
+      try {
+        processedBuffer = await resizeProfilePhoto(file.buffer, file.mimetype);
+      } catch (err) {
+        return res.status(400).json({ error: "Failed to process image file." });
+      }
+
+      // 3. Upload new photo to Cloudinary in public folder
+      const public_id = `profile_photos/${req.user.userId}_${Date.now()}`;
+      const cloudResult = await uploadToCloudinary(processedBuffer, {
+        public_id,
+        type: "upload", // unsigned/public delivery
+        resource_type: "image",
+        overwrite: true,
+      });
+
+      // 4. Update secure_url and public_id in database
+      const { error: dbError } = await supabase
+        .from("users")
+        .update({
+          profile_photo_url: cloudResult.secure_url,
+          profile_photo_public_id: cloudResult.public_id,
+        })
+        .eq("id", req.user.userId);
+
+      if (dbError) {
+        // Clean up newly uploaded image on DB error
+        try {
+          await cloudinary.uploader.destroy(cloudResult.public_id, {
+            type: "upload",
+            resource_type: "image",
+          });
+        } catch (_) {}
+        return res.status(500).json({ error: "Failed to save profile photo URL to database." });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Profile photo updated successfully.",
+        profile_photo_url: cloudResult.secure_url,
+      });
+    } catch (err) {
+      console.error("Profile photo upload error:", err);
+      return res.status(500).json({ error: "Unexpected error during upload." });
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────
+// DELETE /api/upload/profile-photo
+// Removes profile photo: destroys on Cloudinary, nulls columns
+// ─────────────────────────────────────────────────────────────────
+router.delete(
+  "/profile-photo",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const supabase = getSupabaseClient();
+      const { data: user, error: fetchError } = await supabase
+        .from("users")
+        .select("profile_photo_public_id")
+        .eq("id", req.user.userId)
+        .single();
+
+      if (fetchError) {
+        return res.status(500).json({ error: "Failed to fetch user record." });
+      }
+
+      if (user && user.profile_photo_public_id) {
+        try {
+          await cloudinary.uploader.destroy(user.profile_photo_public_id, {
+            type: "upload",
+            resource_type: "image",
+          });
+        } catch (err) {
+          console.error("Failed to destroy profile photo on Cloudinary:", err);
+        }
+      }
+
+      const { error: dbError } = await supabase
+        .from("users")
+        .update({
+          profile_photo_url: null,
+          profile_photo_public_id: null,
+        })
+        .eq("id", req.user.userId);
+
+      if (dbError) {
+        return res.status(500).json({ error: "Failed to update profile columns in database." });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Profile photo removed successfully.",
+      });
+    } catch (err) {
+      console.error("Profile photo delete error:", err);
+      return res.status(500).json({ error: "Unexpected error during deletion." });
+    }
   }
 );
 

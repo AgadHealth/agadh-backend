@@ -21,17 +21,6 @@ const Doctor = {
     if (error) throw error;
     return data;
   },
-
-  findByUserId: async (userId) => {
-    const { data, error } = await getSupabaseClient()
-      .from("doctors")
-      .select("*, users(*)")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
-  },
 };
 
 module.exports = Doctor;

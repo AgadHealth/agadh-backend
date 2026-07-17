@@ -38,6 +38,41 @@ const requireAuth = async (req, res, next) => {
     req.authUser = authData.user;
     req.accessToken = token;
 
+    // Step 5: Verify this session is registered as an active device.
+    // The JWT signature was already validated by supabase.auth.getUser above,
+    // so decoding the payload here is safe.
+    let sessionId;
+    try {
+      const payload = JSON.parse(
+        Buffer.from(token.split(".")[1], "base64").toString()
+      );
+      sessionId = payload.session_id ?? null;
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired session." });
+    }
+
+    if (!sessionId) {
+      return res.status(403).json({ error: "Device not registered." });
+    }
+
+    const { data: deviceRow, error: deviceError } = await supabase
+      .from("user_devices")
+      .select("id")
+      .eq("user_id", authData.user.id)
+      .eq("session_id", sessionId)
+      .is("revoked_at", null)
+      .maybeSingle();
+
+    if (deviceError) {
+      return res.status(500).json({ error: "Unable to verify authentication." });
+    }
+
+    if (!deviceRow) {
+      return res
+        .status(403)
+        .json({ error: "Device not registered. Please register your device or remove an existing one." });
+    }
+
     return next();
   } catch (error) {
     return res.status(500).json({ error: "Unable to verify authentication." });
