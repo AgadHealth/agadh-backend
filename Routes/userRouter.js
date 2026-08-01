@@ -32,6 +32,7 @@ router.post("/email/sync", requireAuth, userController.syncEmail);
 router.get("/devices", requireAuth, userController.getUserDevices);
 router.delete("/devices/:id", requireAuth, userController.deleteUserDevice);
 router.post("/devices/logout-others", requireAuth, userController.logoutOtherDevices);
+router.post("/push-token", requireAuth, userController.updatePushToken);
 router.delete("/account", requireAuth, accountDeletionLimiter, userController.deleteAccount);
 
 module.exports = router;

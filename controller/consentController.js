@@ -67,7 +67,32 @@ const consentController = {
       }
 
       if (!version.is_active) {
-        return res.status(400).json({ error: "This consent version is no longer active." });
+        let currentConsentVersionId;
+        try {
+          const { data: activeData } = await supabase
+            .from("consent_versions")
+            .select("id")
+            .eq("role", role)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (activeData?.id) {
+            currentConsentVersionId = activeData.id;
+          }
+        } catch (_) {
+          // Omit if lookup fails
+        }
+
+        const responsePayload = {
+          error: "stale_consent_version",
+          message: "This consent version is no longer active. Please review the latest terms.",
+        };
+
+        if (currentConsentVersionId) {
+          responsePayload.current_consent_version_id = currentConsentVersionId;
+        }
+
+        return res.status(409).json(responsePayload);
       }
 
       if (version.role !== role) {

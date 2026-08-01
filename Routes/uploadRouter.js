@@ -149,7 +149,7 @@ router.post(
     if (!record_type) return res.status(400).json({ error: "record_type is required." });
     file_name = sanitizeString(file_name, 255);
     if (!isValidRecordType(record_type)) {
-      return res.status(400).json({ error: "Invalid record type. Allowed: prescription, lab_report." });
+      return res.status(400).json({ error: "Invalid record type. Allowed: prescription, report, imaging, lab_test." });
     }
     if (patientId && !isValidUUID(patientId)) {
       return res.status(400).json({ error: "Invalid patient ID format." });
@@ -161,10 +161,12 @@ router.post(
       if (!patientId) {
         return res.status(400).json({ error: "patientId is required for doctor uploads." });
       }
-      const active = await isAccessActive(patientId, req.user.userId).catch((e) =>
-        res.status(500).json({ error: e.message })
-      );
-      if (active === false || active === undefined) return;
+      let active;
+      try {
+        active = await isAccessActive(patientId, req.user.userId);
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
       if (!active) {
         return res.status(403).json({ error: "You do not have active access to this patient." });
       }

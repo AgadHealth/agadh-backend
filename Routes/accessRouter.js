@@ -6,6 +6,7 @@ const requireAuth = require("../middleware/requireAuth");
 const requireRole = require("../middleware/requireRole");
 const getSupabaseClient = require("../config/supabaseClient");
 const { isValidAccessCode, isValidUUID } = require("../helpers/validators");
+const { sendNotificationIfEnabled } = require("../services/notificationService");
 
 const generateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -65,6 +66,17 @@ router.post("/generate", generateLimiter, requireRole("patient"), async (req, re
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
+
+  // Trigger 1: Access grant created (patient notification)
+  sendNotificationIfEnabled(
+    req.user.userId,
+    "access_activity",
+    "access_grant_created",
+    "Access code generated",
+    `Your access code was generated and will expire in ${duration_minutes} minutes.`,
+    { access_code: data.access_code, duration_minutes: Number(duration_minutes) }
+  );
+
   return res.status(201).json({ access_code: data.access_code });
 });
 
@@ -129,6 +141,30 @@ router.post("/claim", claimLimiter, requireRole("doctor"), async (req, res) => {
     return res.status(500).json({ error: 'Failed to claim access.' });
   }
 
+  // Trigger 2: Access grant claimed by doctor (patient notification)
+  (async () => {
+    try {
+      const { data: docUser } = await supabase
+        .from("users")
+        .select("full_name")
+        .eq("id", req.user.userId)
+        .maybeSingle();
+
+      const doctorName = docUser?.full_name ? `Dr. ${docUser.full_name}` : "A doctor";
+
+      sendNotificationIfEnabled(
+        existingRow.patient_id,
+        "access_activity",
+        "access_grant_claimed",
+        "Your records were accessed",
+        `${doctorName} claimed access to your medical records.`,
+        { doctor_id: req.user.userId, expires_at: existingRow.expires_at }
+      );
+    } catch (notifErr) {
+      console.error("Error triggering access_grant_claimed notification:", notifErr);
+    }
+  })();
+
   return res.status(200).json({
     message: 'Access granted successfully.',
     patient_id: existingRow.patient_id,
@@ -179,6 +215,17 @@ router.delete("/revoke/:doctorId", requireRole("patient"), async (req, res) => {
     console.error("Revoke Update Error:", updateError);
     return res.status(400).json({ error: updateError.message });
   }
+
+  // Trigger 3: Access revoked by patient (patient confirmation notification)
+  sendNotificationIfEnabled(
+    req.user.userId,
+    "access_activity",
+    "access_revoked",
+    "Access revoked",
+    "Doctor access to your medical records has been revoked.",
+    { doctor_id: doctorId }
+  );
+
   return res.status(200).json({ message: "Access revoked successfully." });
 });
 
@@ -216,6 +263,17 @@ router.delete("/end-session/:patientId", requireRole("doctor"), async (req, res)
     console.error("End Session Update Error:", updateError);
     return res.status(400).json({ error: updateError.message });
   }
+
+  // Trigger 4: Session ended by doctor (patient notification)
+  sendNotificationIfEnabled(
+    patientId,
+    "access_activity",
+    "access_session_ended",
+    "Access session ended",
+    "Your health record access session was closed by your doctor.",
+    { doctor_id: req.user.userId }
+  );
+
   return res.status(200).json({ message: "Session ended successfully." });
 });
 

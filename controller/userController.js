@@ -367,6 +367,46 @@ const userController = {
       return res.status(500).json({ error: error.message || "An unexpected error occurred during account deletion." });
     }
   },
+
+  updatePushToken: async (req, res) => {
+    let { device_id, push_token } = req.body;
+    const userId = req.user.userId;
+
+    if (!device_id) {
+      return res.status(400).json({ error: "device_id is required." });
+    }
+    if (!push_token || typeof push_token !== "string" || push_token.trim() === "") {
+      return res.status(400).json({ error: "push_token is required and must be a non-empty string." });
+    }
+    if (push_token.length > 500) {
+      return res.status(400).json({ error: "push_token exceeds maximum length of 500 characters." });
+    }
+
+    device_id = sanitizeString(device_id, 255);
+    push_token = push_token.trim();
+
+    try {
+      const supabase = getSupabaseClient();
+
+      const { data, error } = await supabase
+        .from("user_devices")
+        .update({ push_token, last_active_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("device_id", device_id)
+        .is("revoked_at", null)
+        .select("id");
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return res.status(404).json({ error: "Device not found or session revoked." });
+      }
+
+      return res.json({ success: true, message: "Push token updated." });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  },
 };
 
 module.exports = userController;

@@ -13,6 +13,7 @@ const patientsRoutes = require("./Routes/patientsRouter");
 const vitalsRoutes = require("./Routes/vitalsRouter");
 const authRoutes = require("./Routes/authRouter");
 const consentRoutes = require("./Routes/consentRouter");
+const notificationRoutes = require("./Routes/notificationRouter");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -49,6 +50,7 @@ app.use("/api/patients", patientsRoutes);
 app.use("/api/vitals", vitalsRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/consent", consentRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.get("/", (req, res) => {
   res.send("backend is live");
